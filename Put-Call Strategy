@@ -1,0 +1,213 @@
+#********* Put-Call Ratio Strategy **********
+
+#import needed packages
+import pandas as pd
+import numpy as np 
+import matplotlib.pyplot as plt
+import math 
+import quandl
+
+#quandl data with personal access account
+def get_data(asset, access, date, file): 
+    inp = quandl.get(asset, authtoken = access, start_date = date)
+    inp.to_csv(file)
+    inp = pd.read_csv(file)
+    return inp
+
+#data pulled directly
+#***********************************
+data_x = get_data("CHRIS/CME_SP1", "", "2015-1-1", '') 
+data_y = get_data("CHRIS/SPX_PC", "", "2015-1-1", '')
+#***********************************
+
+data_1
+data_2
+data_x['PC'] = data_y['S&P Put-Call Ratio']
+data_x['Futures'] = data_x['Last']
+#note: might not need to do lines below
+data = data_x[:1178]
+data
+
+#initialize variables
+
+SMA = 20
+profit_variable = 0
+#first transaction needs to start with bollinger band crossing 
+Flag = 1 
+#boolen variables
+buy_flag = False
+sell_flag = False
+
+#distance away from MA
+k = 1.5 #k * sigma for bollinger bands
+l = 2 #l * sigma for stoploss
+
+#initialize transaction start price
+trans_price = 0
+#major stoploss var
+complete_stoploss = 25
+
+details = list()
+order = list() #Buy/Sell/Ignore
+profit = list()
+MTM = list()
+buy_or_sell = list()
+stop_loss_limit = list()
+trade_cause = list()
+
+#put-call 20 day moving average
+data['movAVG'] = data['PC'].rolling(SMA).mean()
+
+#put call day before
+data['PC_before'] = data['PC'].shift(1)
+
+#create function for standard deviation
+def var(data1, mov_avg, window_length):
+    SMA = window_length
+    #difference in series
+    diff = data1.subtract(mov_avg)
+    #square
+    diff_sqr = diff.apply(lambda x: x**2)
+    #summing of average of diff^2
+    summation = diff_sqr.rolling(SMA - 1).mean()
+    sigma = summation.apply(lambda x: math.sqrt(x))
+    return sigma
+     
+sigma = var(data['PC'], data['movAVG'], SMA)
+k_sig = k * sigma
+l_sig = l * sigma 
+
+#**BOLLINGER BANDS**
+data['UB'] = data['movAVG'].add(k_sig) #upper 
+data['LB'] = data['movAVG'].subtract(k_sig) #lower
+data['USL'] = data['UB'].add(l_sig) #upper stoploss
+data['LSL'] = data['LB'].subtract(l_sig) #lower stoploss
+
+#list states either Buy, Sell, Nothing
+data['order'] = pd.Series()
+
+size = data['PC'].size
+
+for i in range(size):
+    profit_variable = o #profit per trade
+    future_cost = data['Futures'][i] #cost for each future
+    pcr = data['PC'][i] #put-call ratio at each point
+    pcr_before = data['PC_before'][i]
+    UB = data['UB'][i]
+    LB = data['LB'][i]
+    USL = data['USL'][i]
+    LSL = data['LSL'][i]
+    movAvg = data['movAVG'][i]
+
+    #signals to determine when to trade
+    UB_cross = (pcr > UB) and (pcr_before < UB) #pcr crosses UB 
+    LB_cross = (pcr < LB) and (pcr_before > LB) #pcr crosses LB
+    USL_cross = (pcr > USL) and (pcr_before < USL) #pcr crosses above stoploss
+    LSL_cross = (pcr < LSL) and (pcr_before > LSL) #pcr crosses below stoploss
+    movAVG_crossup = (pcr > movAVG) and (pcr_before < movAVG) #pcr crosses above moving average 
+    movAVG_crosslow = (pcr < movAVG) and (pcr_before > movAVG) #pcr crosses below movin average
+
+    #implement strategy
+    if(UB_cross and (not buy_flag) and Flag == 1):
+        Flag = 0 
+        buy_flag = True
+        sell_flag = False
+        #price at which S&P future bought once order placed 
+        trans_price = future_cost
+        details = [1, "Buy", "UB Crossed", "0", "Position Taken"]
+
+    elif(LB_cross and (not sell_flag) and flag == 1):
+        Flag = 0
+        sell_flag = True
+        buy_flag = False
+        trans_price = future_cost
+        details = [-1, "Sell", "LB Crossed", "0", "Position Taken"]
+
+    elif(movAVG_crossup and (not buy_flag) and Flag == 0):
+        Flag = 1
+        buy_flag = False
+        sell_flag = False
+        profit_variable = future_cost - trans_price
+        details = [1, "movAVG Crossed", "0", "Position Closed"]
+    
+    elif(LSL_cross and (not buy_flag) and Flag == 0): #Buy order if pcr crosses LSL to close trade
+        Flag = 1
+        buy_flag = False
+        sell_flag = False
+        profit_variable = future_cost - trans_price
+        details = [1, "Buy", "LSL Crossed", "Stoploss Executed", "Position Closed"]
+    
+    elif((future_cost - trans_price) > complete_stoploss and (not buy_flag) and Flag == 0): #Buy order if pcr crosses lower complete stoploss
+        Flag = 0
+        buy_flag = False
+        sell_flag = False
+        profit_variable = future_cost - trans_price
+        details = [1, "Buy", "LSL Crossed", "Stoploss Executed", "Position Closed"]
+    
+    elif(movAVG_crosslow and (not sell_flag) and Flag == 0): #Close position if pcr drops below moving average 
+        Flag = 1
+        buy_flag = False
+        sell_flag = False
+        profit_variable = -(future_cost - trans_price)
+        details = [-1, "Sell", "movAVG Crossed (High to Low)", "0", "Position Closed"]
+    
+    elif(USL_cross and (not sell_flag) and Flag == 0): #Closed position when upper stoploss crossed
+        Flag = 1
+        buy_flag = False
+        sell_flag = False
+        profit_variable = -(future_cost - trans_price)
+        details = [-1, "Sell", "USL Crossed", "Stoploss Executed", "Position Closed"]
+
+    elif( (-future_cost - trans_price) > complete_stoploss and (not sell_flag) and Flag == 0): #Sell order if pcr crosses upper complete stop loss
+        Flag = 1
+        buy_flag = False
+        sell_flag = False
+        profit_variable = -(future_cost - trans_price)
+        details = [-1, "Sell", "USL Crossed", "Complete Stoploss Executed", "Position Closed"]
+    
+    else: 
+        if(buy_flag == 0 and sell_flag == 0): 
+            tempo = "0"
+        else: 
+            if(buy_flag == 1 amd sell_flag == 0):
+                tempo = (data['Futures'][i] - trans_price) * 500
+            if(buy_flag == 0 and sell_flag == 1):
+                tempo = (- data['Futures'][i] + trans_price) * 500
+        details = [0, "No Trade", "No Trade", "0", tempo]
+    
+    profit.append(profit_variable)
+    order.append(details[0])
+    buy_or_sell.append(details[1])
+    trade_cause.append(details[2])
+    stop_loss_limit.append(details[3])
+    MTM.append(details[4])
+
+data['Placed_Order'] = pd.Series(order)
+data['Cost'] = (data['Placed_Order'].multiply(data['Futures'])) * 500
+data['Out'] = data['Cost'].cumsum()
+data['buy_sell'] = pd.Series(buy_or_sell)
+data['Profit'] = -pd.Series(profit) * 500
+data['Stoploss'] = pd.Series(stop_loss_limit)
+data['Trade_Cause'] = pd.Series(trade_cause)
+data['MTM'] = pd.Series(MTM)
+print(data['Cost_Sum'])
+
+final = pd.DataFrame()
+final['Date'] = data['Date']
+final['Close'] = data['Futures']
+final['PCR'] = data['PC']
+final['Placed_Order'] = data['Placed_Order']
+final['Buy_Sell'] = data['buy_sell']
+final['Trade_Cause'] = data['trade_cause']
+final['PnL'] = data['Profit']
+final['MTM'] = data['MTM']
+final['Stoploss'] = data['Stoploss']
+final['Cash Account'] = data['Out']
+
+final.to_excel('PCR_Trading_Strategy', sheet_name = 'Sheet1')
+
+#plot data
+plt.plot(data['PC'])
+plt.plot(data['movAVG'])
+plt.plot(data['UB'])
+plt.plot(data['LB'])
